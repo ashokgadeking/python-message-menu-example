@@ -1,15 +1,19 @@
 from flask import Flask, request, make_response, Response
 import os
 import json
-
-from slackclient import SlackClient
+import ssl
+from slack import WebClient
 
 # Your app's Slack bot user token
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 SLACK_VERIFICATION_TOKEN = os.environ["SLACK_VERIFICATION_TOKEN"]
 
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
+
 # Slack client for Web API requests
-slack_client = SlackClient(SLACK_BOT_TOKEN)
+slack_client = WebClient(token=SLACK_BOT_TOKEN, ssl=ssl_context)
 
 # Flask webserver for incoming traffic from Slack
 app = Flask(__name__)
@@ -33,17 +37,30 @@ def message_options():
 
     # Dictionary of menu options which will be sent as JSON
     menu_options = {
-        "options": [
-            {
-                "text": "Cappuccino",
-                "value": "cappuccino"
-            },
-            {
-                "text": "Latte",
-                "value": "latte"
-            }
-        ]
-    }
+              "options": [
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Cappuccino",
+                  },
+                  "value": "Cappuccino"
+                },
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Latte"
+                  },
+                  "value": "Latte"
+                },
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Cortado"
+                  },
+                  "value": "Cortado"
+                }
+              ]
+        }
 
     # Load options dict as JSON and respond to Slack
     return Response(json.dumps(menu_options), mimetype='application/json')
@@ -60,50 +77,53 @@ def message_actions():
     verify_slack_token(form_json["token"])
 
     # Check to see what the user's selection was and update the message accordingly
-    selection = form_json["actions"][0]["selected_options"][0]["value"]
+    selection = form_json["actions"][0]["selected_option"]["value"]
 
-    if selection == "cappuccino":
-        message_text = "cappuccino"
-    else:
-        message_text = "latte"
-
-    response = slack_client.api_call(
-      "chat.update",
+    response = slack_client.chat_postMessage(
       channel=form_json["channel"]["id"],
-      ts=form_json["message_ts"],
-      text="One {}, right coming up! :coffee:".format(message_text),
-      attachments=[] # empty `attachments` to clear the existing massage attachments
+      ts=form_json["message"]["ts"],
+      text="One {}, right coming up! :coffee:".format(selection),
     )
 
     # Send an HTTP 200 response with empty body so Slack knows we're done here
     return make_response("", 200)
 
+
 # Send a Slack message on load. This needs to be _before_ the Flask server is started
 
 # A Dictionary of message attachment options
-attachments_json = [
-    {
-        "fallback": "Upgrade your Slack client to use messages like these.",
-        "color": "#3AA3E3",
-        "attachment_type": "default",
-        "callback_id": "menu_options_2319",
-        "actions": [
-            {
-                "name": "bev_list",
-                "text": "Pick a beverage...",
-                "type": "select",
-                "data_source": "external"
+attachments_json = [{
+    "blocks": [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Would you like some coffee? :coffee:"
             }
-        ]
-    }
-]
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Pick a beverage..."
+            },
+            "accessory": {
+                "type": "external_select",
+                "action_id": "menu_options_2319",
+                "placeholder": {
+                    "type": "plain_text",
+                    "text": "Select an item"
+                },
+                "min_query_length": 0
+            }
+        }
+    ]
+}]
 
 # Send a message with the above attachment, asking the user if they want coffee
-slack_client.api_call(
-  "chat.postMessage",
-  channel="#python",
-  text="Would you like some coffee? :coffee:",
-  attachments=attachments_json
+response = slack_client.chat_postMessage(
+  channel="#random",
+  attachments=json.dumps(attachments_json)
 )
 
 # Start the Flask server
