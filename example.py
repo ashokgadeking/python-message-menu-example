@@ -6,6 +6,8 @@ from slack import WebClient
 
 # Your app's Slack bot user token
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
+
+# Verification token to verify received json payloads
 SLACK_VERIFICATION_TOKEN = os.environ["SLACK_VERIFICATION_TOKEN"]
 
 ssl_context = ssl.create_default_context()

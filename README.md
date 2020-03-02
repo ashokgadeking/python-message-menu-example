@@ -57,14 +57,19 @@ First you'll create the basic elements of the app: A Slack client and webserver
 
 ```
 from flask import Flask, request, make_response, Response
-from slackclient import SlackClient
+import os
 import json
+import ssl
+from slack import WebClient
 
 # Your app's Slack bot user token
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 
+# Verification token to verify received json payloads
+SLACK_VERIFICATION_TOKEN = os.environ["SLACK_VERIFICATION_TOKEN"]
+
 # Slack client for Web API requests
-slack_client = SlackClient(SLACK_BOT_TOKEN)
+slack_client = WebClient(token=SLACK_BOT_TOKEN, ssl=ssl_context)
 
 # Flask webserver for incoming traffic from Slack
 app = Flask(__name__)
@@ -80,19 +85,37 @@ def message_options():
     # Parse the request payload
     form_json = json.loads(request.form["payload"])
 
-    menu_options = {
-        "options": [
-            {
-                "text": "Chess",
-                "value": "chess"
-            },
-            {
-                "text": "Global Thermonuclear War",
-                "value": "war"
-            }
-        ]
-    }
+    # Verify that the request came from Slack
+    verify_slack_token(form_json["token"])
 
+    # Dictionary of menu options which will be sent as JSON
+    menu_options = {
+              "options": [
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Cappuccino",
+                  },
+                  "value": "Cappuccino"
+                },
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Latte"
+                  },
+                  "value": "Latte"
+                },
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Cortado"
+                  },
+                  "value": "Cortado"
+                }
+              ]
+        }
+
+    # Load options dict as JSON and respond to Slack
     return Response(json.dumps(menu_options), mimetype='application/json')
 ```
 
@@ -106,22 +129,19 @@ def message_actions():
     # Parse the request payload
     form_json = json.loads(request.form["payload"])
 
-    # Check to see what the user's selection was and update the message
-    selection = form_json["actions"][0]["selected_options"][0]["value"]
+    # Verify that the request came from Slack
+    verify_slack_token(form_json["token"])
 
-    if selection == "war":
-        message_text = "The only winning move is not to play.\nHow about a nice game of chess?"
-    else:
-        message_text = ":horse:"
+    # Check to see what the user's selection was and update the message accordingly
+    selection = form_json["actions"][0]["selected_option"]["value"]
 
-    response = slack_client.api_call(
-      "chat.update",
+    response = slack_client.chat_postMessage(
       channel=form_json["channel"]["id"],
-      ts=form_json["message_ts"],
-      text=message_text,
-      attachments=[]
+      ts=form_json["message"]["ts"],
+      text="One {}, right coming up! :coffee:".format(selection),
     )
 
+    # Send an HTTP 200 response with empty body so Slack knows we're done here
     return make_response("", 200)
 ```
 
@@ -131,45 +151,45 @@ Now that our endpoints are configured, we can build the message containing the m
 In order to show the menu, we'll have to build the message attachment which will contain it.
 
 ```
-message_attachments = [
-    {
-        "fallback": "Upgrade your Slack client to use messages like these.",
-        "color": "#3AA3E3",
-        "attachment_type": "default",
-        "callback_id": "menu_options_2319",
-        "actions": [
-            {
-                "name": "games_list",
-                "text": "Pick a game...",
-                "type": "select",
-                "data_source": "external"
+attachments_json = [{
+    "blocks": [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Would you like some coffee? :coffee:"
             }
-        ]
-    }
-]
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Pick a beverage..."
+            },
+            "accessory": {
+                "type": "external_select",
+                "action_id": "menu_options_2319",
+                "placeholder": {
+                    "type": "plain_text",
+                    "text": "Select an item"
+                },
+                "min_query_length": 0
+            }
+        }
+    ]
+}]
 ```
 
 Once the attachment JSON is ready, simply post a message to the channel, adding the attachment containing the menu.
 
 ```
-slack_client.api_call(
-  "chat.postMessage",
-  channel="C09EM2073",
-  text="Shall we play a game?",
-  attachments=message_attachments
+response = slack_client.chat_postMessage(
+  channel="#random",
+  attachments=json.dumps(attachments_json)
 )
 ```
 
-Take note of the ``"data_source": "external"`` attribute in the attachment JSON. This is how Slack knows to pull the menu options from the ``message_options`` endpoint we set up above.
-
-```
-slack_client.api_call(
-  "chat.postMessage",
-  channel="C09EM2073",
-  text="Shall we play a game?",
-  attachments=attachments_json
-)
-```
+Take note of the ``"type": "external_select"`` attribute in the attachment JSON. This is how Slack knows to pull the menu options from the ``message_options`` endpoint we set up above.
 
 
 Support
